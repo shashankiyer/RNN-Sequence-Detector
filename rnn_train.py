@@ -151,8 +151,8 @@ class rnn_net:
         reg = regularization_dic[cost]
 
         #cost function
-        cf = tf.nn.softmax_cross_entropy_with_logits(
-            logits = outputs , labels = y) + reg     
+        cf = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+            logits = outputs , labels = y) + reg)     
 
         out_layer= tf.nn.softmax(outputs)
         
