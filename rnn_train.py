@@ -1,36 +1,60 @@
 import tensorflow as tf
-import random, os, sys, time
+import random, os, sys, time, math
+import matplotlib.pyplot as plt
 
 os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
-samples = 50
-seq_length = 30
+samples = 5
+seq_length = 50
 max_value = 100
-output_classes = 2
-MINI_BATCH_SIZE = 5
-LEARNING_RATE = 0.005
+output_classes = 4
+MINI_BATCH_SIZE = 1
+LEARNING_RATE = 0.001
 EPOCHS = 2
+cf_array=[]
 
 class data_generator:
     def __init__(self):
         self.data = []
         self.labels = []
         self.seqlen = []
+        self.type = None
         for i in range(samples):
-            if random.random() < .5:
+            randomVal = random.random()
+            if randomVal < .25:
                 # Generate a linear sequence
                 divisor = random.randint(1, max_value)
                 seq_start = random.randint (0, max_value)
                 s = [[float(i)/divisor] for i in
                      range(seq_start, seq_start + seq_length)]
                 self.data.append(s)
-                self.labels.append([1., 0.])
+                self.labels.append([1., 0., 0., 0.])
+                self.type = 1
+            elif randomVal < .5:
+                # Generate a sinusoidal sequence
+                divisor = random.randint(1, max_value)
+                seq_start = random.randint (0, max_value)
+                s = [[math.sin(float(i)/divisor)] for i in
+                     range(seq_start, seq_start + seq_length)]
+                self.data.append(s)
+                self.labels.append([0., 1., 0., 0.])
+                self.type = 2
+            elif randomVal < .75:
+                # Generate an exponential sequence
+                divisor = random.randint(1, max_value)
+                seq_start = random.randint (0, max_value)
+                s = [[math.pow(float(i), 2)] for i in
+                     range(seq_start, seq_start + seq_length)]
+                self.data.append(s)
+                self.labels.append([0., 0., 1., 0.])
+                self.type = 3
             else:
                 # Generate a random sequence
                 s = [[float(random.randint(0, max_value))/max_value]
                      for i in range(seq_length)]
                 self.data.append(s)
-                self.labels.append([0., 1.])
+                self.labels.append([0., 0., 0., 1.])
+                self.type = 4
     
 
 
@@ -130,7 +154,7 @@ class rnn_net:
         
         regularization_dic = {"cross": tf.contrib.layers.apply_regularization(tf.contrib.layers.l1_regularizer(0.0),  W.values()), 
                     "cross-l1": tf.contrib.layers.apply_regularization(tf.contrib.layers.l1_regularizer(0.01), W.values()),
-                    "cross-l2":  tf.contrib.layers.apply_regularization(tf.contrib.layers.l2_regularizer(0.01), W.values()),
+                    "cross-l2":  tf.contrib.layers.apply_regularization(tf.contrib.layers.l2_regularizer(0.01), tf.trainable_variables()),
                     "test": 0}    
         
         reg = regularization_dic[cost]
@@ -158,7 +182,7 @@ class rnn_net:
         sess.run(init)
 
         if mode == 'training':
-            return x, y, sess, train, accuracy, out_layer
+            return x, y, sess, train, accuracy, out_layer, cf
         elif mode == 'test':
             return x, y, out_layer, accuracy
 
@@ -175,11 +199,12 @@ class rnn_net:
         :param name of model file to save the created tf graph
         '''
        
-        x=params['x']
-        y=params['y']
-        sess=params['sess']
-        train=params['train']
-        accuracy=params['accuracy']
+        x = params['x']
+        y = params['y']
+        sess = params['sess']
+        train = params['train']
+        accuracy = params['accuracy']
+        cf = params['cf']
 
         start_time=time.time()
     
@@ -189,9 +214,9 @@ class rnn_net:
             for k in range(0, len(xdata), MINI_BATCH_SIZE):
                 current_batch_x_train = xdata[k:k+MINI_BATCH_SIZE]
                 current_batch_y_train = ydata[k:k+MINI_BATCH_SIZE]
-                _= sess.run(train,
+                _, c= sess.run([train, cf],
                         {x: current_batch_x_train, y: current_batch_y_train})           
-
+                cf_array.extend(c)
 
         train_time=time.time() - start_time
         
@@ -200,13 +225,14 @@ class rnn_net:
         
         print("Total training time= ", train_time, "seconds")
 
+
     def _5_fold_cross_validation(self, network_description, cost, model):
         '''Performs 5-fold cross validation
 
         :param text file containing the network description
         :param regularisation to apply
         '''
-        x, y, sess, train, accuracy, out_layer = rnn_net.__initialise_variables(network_description, 'training', cost)
+        x, y, sess, train, accuracy, out_layer, cf = rnn_net.__initialise_variables(network_description, 'training', cost)
         params={}
         params['x']=x
         params['y']=y
@@ -214,6 +240,7 @@ class rnn_net:
         params['train']=train
         params['accuracy']=accuracy
         params['out_layer']=out_layer
+        params['cf']=cf
         model = os.path.join(os.getcwd(), model)
         subset_size = len(self.x) // 5
         subsets_x = []
@@ -295,18 +322,51 @@ class rnn_net:
             print("Confusion Matrix:\n", confusion_matrix)
 
         else :
-            return  total_accuracy, confusion_matrix    
+            return  total_accuracy, confusion_matrix
+        for i in range(5):
+            plt.plot(xdata[i][:])
+            if pred[i] == 0:
+                plt.title("Linear")
+            elif pred[i] == 1:
+                plt.title("Sine")
+            elif pred[i] == 2:
+                plt.title("Exp")
+            elif pred[i] == 3:
+                plt.title("Rand")
+            directory = "Tested Data"
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            plt.savefig(directory+"/"+ str(i))
+            plt.close()
+
 
 if __name__ == '__main__' :
-    if len(sys.argv) != 2:
-        print ("Please supply the correct arguments")
-        raise SystemExit(1)
+    if len(sys.argv) < 2 and len(sys.argv) > 4:
+            print ("Please supply the correct arguments")
+            raise SystemExit(1)
+    if sys.argv[1] == 'train':
+        if len(sys.argv) != 4:
+            print ("Please supply the correct arguments")
+            raise SystemExit(1)
+    elif sys.argv[1] == 'test':
+        if len(sys.argv) != 3:
+            print ("Please supply the correct arguments")
+            raise SystemExit(1)
 
+
+train_test = sys.argv[1]
+samples = int(sys.argv[2])
+
+if train_test == 'train':
+    LEARNING_RATE = float(sys.argv[3])
 data_train= data_generator()
-
 rnn_model = rnn_net ( getattr(data_train, 'data'), getattr(data_train, 'labels'))
 
-if str(sys.argv[1]) == 'test' :
+if str(train_test) == 'test' :
     rnn_model.test(model_file = 'model', cost='cross', network_description='network_description')
 else:
-    rnn_model._5_fold_cross_validation('network_description', 'cross', 'model')
+    rnn_model._5_fold_cross_validation('network_description', 'cross-l2', 'model')
+    plt.plot(cf_array[-50:])
+    plt.title("Cost Function")
+    plt.show()
+    plt.close()
